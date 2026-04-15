@@ -1,332 +1,149 @@
-const FEE_WALLET = "DuX1wcoQrJ6XypxLNq3GRrmHFAAMgCqAKbzboabyCtzB";
-const MULTISIG  = "J9iWieFzB4GbV4LVfKJT4aPY2nByi3vYuKRBCwsjeZ4t";
-const APPROVER  = "6qrp8Pv3YM9uuP4Bi17rjEsS9E8crLpfMwVLGvNRQPPr";
-const RPC = "https://mainnet.helius-rpc.com/?api-key=52da5414-0bf9-4d8a-a9a8-3484e52724c1";
+const SUMMARY_API = "/api/summary";
 
-let solPrice = 84;
-let previousBalance = null;
-let solChart = null;
-let walletChart = null;
-
-// ─── Core RPC ────────────────────────────────────────────────────
-async function rpc(method, params) {
-  const res = await fetch(RPC, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params })
-  });
-  const data = await res.json();
-  return data.result;
-}
-
-// ─── Fetch full tx details for a signature list ──────────────────
-async function fetchTxDetails(signatures, walletAddress) {
-  const results = await Promise.all(
-    signatures.map(s =>
-      rpc("getTransaction", [
-        s.signature,
-        { encoding: "jsonParsed", maxSupportedTransactionVersion: 0 }
-      ])
-        .then(tx => ({ ...tx, signature: s.signature, blockTime: s.blockTime }))
-        .catch(() => ({ signature: s.signature, blockTime: s.blockTime }))
-    )
-  );
-  return results;
-}
-
-// ─── SOL price ───────────────────────────────────────────────────
-async function fetchSolPrice() {
-  try {
-    const res = await fetch(
-      "https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd"
-    );
-    const data = await res.json();
-    solPrice = data.solana.usd;
-  } catch (e) {}
-}
-
-// ─── Helpers ─────────────────────────────────────────────────────
 function shortenSig(sig) {
   return sig.slice(0, 8) + "..." + sig.slice(-6);
 }
 
 function timeAgo(ts) {
+  if (!ts) return "--";
+
   const diff = Math.floor(Date.now() / 1000) - ts;
+
   if (diff < 60) return diff + "s ago";
   if (diff < 3600) return Math.floor(diff / 60) + "m ago";
   if (diff < 86400) return Math.floor(diff / 3600) + "h ago";
   return Math.floor(diff / 86400) + "d ago";
 }
 
-// ─── Row: fee transactions ────────────────────────────────────────
+async function fetchSummary() {
+  const response = await fetch(SUMMARY_API);
+
+  if (!response.ok) {
+    throw new Error(`Summary API failed with status ${response.status}`);
+  }
+
+  const data = await response.json();
+
+  if (!data.ok) {
+    throw new Error(data.error || "Summary API returned an error");
+  }
+
+  return data;
+}
+
 function renderFeeRow(tx) {
   const time = tx.blockTime ? timeAgo(tx.blockTime) : "--";
   const failed = tx.err !== null && tx.err !== undefined;
+
   return `
-    <div class="flex items-center justify-between ${failed ? "bg-red-950 border border-red-700" : "bg-gray-800"} rounded-xl px-4 py-2">
+    <div class="flex items-center justify-between ${
+      failed ? "bg-red-950 border border-red-700" : "bg-gray-800"
+    } rounded-xl px-4 py-2">
       <a href="https://solscan.io/tx/${tx.signature}" target="_blank"
          class="text-blue-400 hover:underline text-xs">${shortenSig(tx.signature)}</a>
       <span class="text-gray-400 text-xs">${time}</span>
-      ${failed
-        ? '<span class="text-red-400 font-bold text-xs">⚠ FAILED TX</span>'
-        : '<span class="text-emerald-400 font-bold text-xs">+0.075 SOL</span>'
+      ${
+        failed
+          ? '<span class="text-red-400 font-bold text-xs">⚠ FAILED TX</span>'
+          : '<span class="text-emerald-400 font-bold text-xs">+0.075 SOL</span>'
       }
-    </div>`;
+    </div>
+  `;
 }
 
-// ─── Row: multisig / approver activity ───────────────────────────
-function renderActivityRow(tx, walletAddress) {
-  const time = tx.blockTime ? timeAgo(tx.blockTime) : "--";
-  let action = '<span class="text-gray-500 text-xs">Program interaction</span>';
-
-  try {
-    const preBalances  = tx.meta?.preBalances  || [];
-    const postBalances = tx.meta?.postBalances || [];
-    const keys = tx.transaction?.message?.accountKeys || [];
-    const accounts = keys.map(k => (typeof k === "string" ? k : k.pubkey));
-    const idx = accounts.indexOf(walletAddress);
-
-    if (idx !== -1 && preBalances[idx] !== undefined) {
-      const diff = (postBalances[idx] - preBalances[idx]) / 1_000_000_000;
-      if (diff > 0.0001) {
-        action = `<span class="text-emerald-400 text-xs font-bold">▼ Received ${diff.toFixed(4)} SOL</span>`;
-      } else if (diff < -0.0001) {
-        action = `<span class="text-red-400 text-xs font-bold">▲ Sent ${Math.abs(diff).toFixed(4)} SOL</span>`;
-      }
-    }
-  } catch (e) {}
-
-  return `
-    <div class="flex items-center justify-between bg-gray-800 rounded-xl px-4 py-2">
-      <a href="https://solscan.io/tx/${tx.signature}" target="_blank"
-         class="text-blue-400 hover:underline text-xs">${shortenSig(tx.signature)}</a>
-      <span class="text-gray-400 text-xs">${time}</span>
-      ${action}
-    </div>`;
+function setText(id, value) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = value;
 }
 
-// ─── Outgoing alert ──────────────────────────────────────────────
-function checkOutgoing(sol) {
-  if (previousBalance !== null && sol < previousBalance - 0.001) {
-    const dropped = (previousBalance - sol).toFixed(4);
-    document.getElementById("alert-box").classList.remove("hidden");
-    document.getElementById("alert-msg").textContent =
-      `Balance dropped by ${dropped} SOL. Money may have left the fee wallet. Check Solscan immediately.`;
+function initializePlaceholders() {
+  const solChart = document.getElementById("sol-chart");
+  const walletChart = document.getElementById("wallet-chart");
+
+  if (solChart && solChart.parentElement) {
+    solChart.parentElement.innerHTML = `
+      <h2 class="text-sm font-semibold text-gray-300 mb-4">Daily SOL Contributed</h2>
+      <p class="text-sm text-gray-500">This chart will be wired in the next step using a server-side API route.</p>
+    `;
   }
-  previousBalance = sol;
-}
 
-// ─── Charts ──────────────────────────────────────────────────────
-async function updateCharts() {
-  try {
-    const sigs = await rpc("getSignaturesForAddress", [FEE_WALLET, { limit: 200 }]);
-    if (!sigs || sigs.length === 0) return;
+  if (walletChart && walletChart.parentElement) {
+    walletChart.parentElement.innerHTML = `
+      <h2 class="text-sm font-semibold text-gray-300 mb-4">Daily Wallets Contributing</h2>
+      <p class="text-sm text-gray-500">This chart will be wired in the next step using a server-side API route.</p>
+    `;
+  }
 
-    const dayMap = {};
-    for (const sig of sigs) {
-      if (!sig.blockTime) continue;
-      const date = new Date(sig.blockTime * 1000).toLocaleDateString("en-US", {
-        month: "short", day: "numeric"
-      });
-      dayMap[date] = (dayMap[date] || 0) + 1;
-    }
+  const multisigList = document.getElementById("multisig-list");
+  if (multisigList) {
+    multisigList.innerHTML =
+      '<p class="text-gray-500">Multisig activity will be connected in the next step.</p>';
+  }
 
-    const labels = Object.keys(dayMap).reverse();
-    const counts = labels.map(d => dayMap[d]);
-    const sols   = counts.map(c => parseFloat((c * 0.075).toFixed(3)));
-
-    const sharedOptions = {
-      responsive: true,
-      plugins: { legend: { display: false } },
-      scales: {
-        x: {
-          ticks: { color: "#9ca3af", font: { size: 10 } },
-          grid:  { color: "rgba(255,255,255,0.05)" }
-        },
-        y: {
-          ticks: { color: "#9ca3af", font: { size: 10 } },
-          grid:  { color: "rgba(255,255,255,0.05)" }
-        }
-      }
-    };
-
-    // SOL chart
-    if (solChart) {
-      solChart.data.labels = labels;
-      solChart.data.datasets[0].data = sols;
-      solChart.update();
-    } else {
-      solChart = new Chart(document.getElementById("sol-chart").getContext("2d"), {
-        type: "bar",
-        data: {
-          labels,
-          datasets: [{
-            label: "SOL",
-            data: sols,
-            backgroundColor: "rgba(52, 211, 153, 0.7)",
-            borderColor: "rgba(52, 211, 153, 1)",
-            borderWidth: 1,
-            borderRadius: 6,
-            borderSkipped: false
-          }]
-        },
-        options: {
-          ...sharedOptions,
-          plugins: {
-            ...sharedOptions.plugins,
-            tooltip: { callbacks: { label: ctx => `${ctx.parsed.y} SOL` } }
-          }
-        }
-      });
-    }
-
-    // Wallet chart
-    if (walletChart) {
-      walletChart.data.labels = labels;
-      walletChart.data.datasets[0].data = counts;
-      walletChart.update();
-    } else {
-      walletChart = new Chart(document.getElementById("wallet-chart").getContext("2d"), {
-        type: "bar",
-        data: {
-          labels,
-          datasets: [{
-            label: "Wallets",
-            data: counts,
-            backgroundColor: "rgba(96, 165, 250, 0.7)",
-            borderColor: "rgba(96, 165, 250, 1)",
-            borderWidth: 1,
-            borderRadius: 6,
-            borderSkipped: false
-          }]
-        },
-        options: {
-          ...sharedOptions,
-          plugins: {
-            ...sharedOptions.plugins,
-            tooltip: { callbacks: { label: ctx => `${ctx.parsed.y} wallets` } }
-          }
-        }
-      });
-    }
-
-  } catch (e) {
-    console.error("Chart update failed:", e);
+  const approverList = document.getElementById("approver-list");
+  if (approverList) {
+    approverList.innerHTML =
+      '<p class="text-gray-500">Approver wallet activity will be connected in the next step.</p>';
   }
 }
 
-// ─── Wallet search ───────────────────────────────────────────────
 async function searchWallet() {
-  const input = document.getElementById("search-input").value.trim();
   const resultBox = document.getElementById("search-result");
-
-  if (!input || input.length < 32) {
-    resultBox.innerHTML = '<p class="text-red-400">Please enter a valid Solana wallet address.</p>';
-    return;
-  }
-
-  resultBox.innerHTML = '<p class="text-gray-400 text-sm">Searching last 20 transactions...</p>';
-
-  try {
-    const sigs = await rpc("getSignaturesForAddress", [FEE_WALLET, { limit: 20 }]);
-    if (!sigs) {
-      resultBox.innerHTML = '<p class="text-red-400">Could not fetch transactions.</p>';
-      return;
-    }
-
-    let found = false;
-    let foundSig = null;
-
-    for (const sig of sigs) {
-      const tx = await rpc("getTransaction", [
-        sig.signature,
-        { encoding: "jsonParsed", maxSupportedTransactionVersion: 0 }
-      ]);
-      if (!tx) continue;
-      const keys = tx.transaction?.message?.accountKeys || [];
-      const accounts = keys.map(k => (typeof k === "string" ? k : k.pubkey));
-      if (accounts.includes(input)) {
-        found = true;
-        foundSig = sig.signature;
-        break;
-      }
-    }
-
-    if (found) {
-      resultBox.innerHTML = `
-        <div class="bg-emerald-900 border border-emerald-600 rounded-xl px-4 py-3">
-          <p class="text-emerald-300 font-bold">✓ Wallet found — contributed to the fee wallet</p>
-          <a href="https://solscan.io/tx/${foundSig}" target="_blank"
-             class="text-blue-400 text-xs hover:underline mt-1 block">View transaction on Solscan</a>
-        </div>`;
-    } else {
-      resultBox.innerHTML = `
-        <div class="bg-gray-800 border border-gray-700 rounded-xl px-4 py-3">
-          <p class="text-gray-300 text-sm">No contribution found in the last 20 transactions.</p>
-          <p class="text-gray-500 text-xs mt-1">Only the most recent 20 txns are checked to avoid rate limits.</p>
-        </div>`;
-    }
-  } catch (e) {
-    resultBox.innerHTML = '<p class="text-red-400">Search failed. Try again.</p>';
+  if (resultBox) {
+    resultBox.innerHTML = `
+      <div class="bg-gray-800 border border-gray-700 rounded-xl px-4 py-3">
+        <p class="text-gray-300 text-sm">Wallet search will be connected in the next step.</p>
+      </div>
+    `;
   }
 }
 
-// ─── Main dashboard update ───────────────────────────────────────
 async function updateDashboard() {
   try {
-    const [balResult, feeSigs, multisigSigs, approverSigs] = await Promise.all([
-      rpc("getBalance", [FEE_WALLET]),
-      rpc("getSignaturesForAddress", [FEE_WALLET,  { limit: 10 }]),
-      rpc("getSignaturesForAddress", [MULTISIG,    { limit: 5  }]),
-      rpc("getSignaturesForAddress", [APPROVER,    { limit: 5  }])
-    ]);
+    const data = await fetchSummary();
 
-    const sol = balResult.value / 1_000_000_000;
+    setText("balance", `${data.balanceSol.toFixed(4)} SOL`);
+    setText(
+      "raised-usd",
+      data.totalCollectedUsd !== null
+        ? `$${Number(data.totalCollectedUsd).toLocaleString()}`
+        : "N/A"
+    );
+    setText("raised-sol", `${data.totalCollectedSol.toFixed(4)} SOL collected`);
+    setText("count", Number(data.registrationsEstimate).toLocaleString());
+    setText("last-update", new Date(data.fetchedAt).toLocaleTimeString());
 
-    document.getElementById("balance").textContent = sol.toFixed(4) + " SOL";
-    document.getElementById("raised-usd").textContent =
-      "$" + (sol * solPrice).toLocaleString(undefined, { maximumFractionDigits: 2 });
-    document.getElementById("raised-sol").textContent = sol.toFixed(4) + " SOL collected";
-    document.getElementById("count").textContent = Math.floor(sol / 0.075).toLocaleString();
-
-    checkOutgoing(sol);
-
-    // Fee txns
     const feeList = document.getElementById("txn-list");
-    feeList.innerHTML = feeSigs && feeSigs.length
-      ? feeSigs.map(tx => renderFeeRow(tx)).join("")
-      : '<p class="text-gray-500">No transactions found.</p>';
-
-    // Multisig activity
-    const mList = document.getElementById("multisig-list");
-    if (!multisigSigs || multisigSigs.length === 0) {
-      mList.innerHTML = '<p class="text-gray-500">No recent activity.</p>';
-    } else {
-      const multisigTxs = await fetchTxDetails(multisigSigs, MULTISIG);
-      mList.innerHTML = multisigTxs.map(tx => renderActivityRow(tx, MULTISIG)).join("");
+    if (feeList) {
+      if (!data.recentTxs || data.recentTxs.length === 0) {
+        feeList.innerHTML = '<p class="text-gray-500">No transactions found.</p>';
+      } else {
+        feeList.innerHTML = data.recentTxs.map(renderFeeRow).join("");
+      }
     }
 
-    // Approver activity
-    const aList = document.getElementById("approver-list");
-    if (!approverSigs || approverSigs.length === 0) {
-      aList.innerHTML = '<p class="text-gray-500">No recent activity.</p>';
-    } else {
-      const approverTxs = await fetchTxDetails(approverSigs, APPROVER);
-      aList.innerHTML = approverTxs.map(tx => renderActivityRow(tx, APPROVER)).join("");
+    const alertBox = document.getElementById("alert-box");
+    if (alertBox) {
+      alertBox.classList.add("hidden");
+    }
+  } catch (error) {
+    console.error("Dashboard update failed:", error);
+
+    const feeList = document.getElementById("txn-list");
+    if (feeList) {
+      feeList.innerHTML =
+        '<p class="text-red-400">Failed to load summary data from /api/summary.</p>';
     }
 
-    document.getElementById("last-update").textContent = new Date().toLocaleTimeString();
-
-  } catch (e) {
-    console.error("Dashboard update failed:", e);
+    setText("balance", "--");
+    setText("raised-usd", "--");
+    setText("raised-sol", "unable to load");
+    setText("count", "--");
+    setText("last-update", "--");
   }
 }
 
-// ─── Init ────────────────────────────────────────────────────────
-fetchSolPrice().then(() => {
-  updateDashboard();
-  updateCharts();
-  setInterval(updateDashboard, 12000);
-  setInterval(updateCharts, 60000);
-  setInterval(fetchSolPrice, 60000);
-});
+initializePlaceholders();
+
+updateDashboard();
+setInterval(updateDashboard, 12000);
