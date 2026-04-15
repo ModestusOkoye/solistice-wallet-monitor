@@ -1,12 +1,14 @@
 const FEE_WALLET = "DuX1wcoQrJ6XypxLNq3GRrmHFAAMgCqAKbzboabyCtzB";
-const MULTISIG = "J9iWieFzB4GbV4LVfKJT4aPY2nByi3vYuKRBCwsjeZ4t";
-const APPROVER = "6qrp8Pv3YM9uuP4Bi17rjEsS9E8crLpfMwVLGvNRQPPr";
+const MULTISIG  = "J9iWieFzB4GbV4LVfKJT4aPY2nByi3vYuKRBCwsjeZ4t";
+const APPROVER  = "6qrp8Pv3YM9uuP4Bi17rjEsS9E8crLpfMwVLGvNRQPPr";
 const RPC = "https://mainnet.helius-rpc.com/?api-key=52da5414-0bf9-4d8a-a9a8-3484e52724c1";
 
 let solPrice = 84;
 let previousBalance = null;
+let solChart = null;
+let walletChart = null;
 
-// ─── Core RPC call ───────────────────────────────────────────────
+// ─── Core RPC ────────────────────────────────────────────────────
 async function rpc(method, params) {
   const res = await fetch(RPC, {
     method: "POST",
@@ -17,7 +19,7 @@ async function rpc(method, params) {
   return data.result;
 }
 
-// ─── Fetch full transaction details for a list of signatures ─────
+// ─── Fetch full tx details for a signature list ──────────────────
 async function fetchTxDetails(signatures, walletAddress) {
   const results = await Promise.all(
     signatures.map(s =>
@@ -56,7 +58,7 @@ function timeAgo(ts) {
   return Math.floor(diff / 86400) + "d ago";
 }
 
-// ─── Row renderers ───────────────────────────────────────────────
+// ─── Row: fee transactions ────────────────────────────────────────
 function renderFeeRow(tx) {
   const time = tx.blockTime ? timeAgo(tx.blockTime) : "--";
   const failed = tx.err !== null && tx.err !== undefined;
@@ -72,12 +74,13 @@ function renderFeeRow(tx) {
     </div>`;
 }
 
+// ─── Row: multisig / approver activity ───────────────────────────
 function renderActivityRow(tx, walletAddress) {
   const time = tx.blockTime ? timeAgo(tx.blockTime) : "--";
   let action = '<span class="text-gray-500 text-xs">Program interaction</span>';
 
   try {
-    const preBalances = tx.meta?.preBalances || [];
+    const preBalances  = tx.meta?.preBalances  || [];
     const postBalances = tx.meta?.postBalances || [];
     const keys = tx.transaction?.message?.accountKeys || [];
     const accounts = keys.map(k => (typeof k === "string" ? k : k.pubkey));
@@ -111,6 +114,105 @@ function checkOutgoing(sol) {
       `Balance dropped by ${dropped} SOL. Money may have left the fee wallet. Check Solscan immediately.`;
   }
   previousBalance = sol;
+}
+
+// ─── Charts ──────────────────────────────────────────────────────
+async function updateCharts() {
+  try {
+    const sigs = await rpc("getSignaturesForAddress", [FEE_WALLET, { limit: 200 }]);
+    if (!sigs || sigs.length === 0) return;
+
+    const dayMap = {};
+    for (const sig of sigs) {
+      if (!sig.blockTime) continue;
+      const date = new Date(sig.blockTime * 1000).toLocaleDateString("en-US", {
+        month: "short", day: "numeric"
+      });
+      dayMap[date] = (dayMap[date] || 0) + 1;
+    }
+
+    const labels = Object.keys(dayMap).reverse();
+    const counts = labels.map(d => dayMap[d]);
+    const sols   = counts.map(c => parseFloat((c * 0.075).toFixed(3)));
+
+    const sharedOptions = {
+      responsive: true,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: {
+          ticks: { color: "#9ca3af", font: { size: 10 } },
+          grid:  { color: "rgba(255,255,255,0.05)" }
+        },
+        y: {
+          ticks: { color: "#9ca3af", font: { size: 10 } },
+          grid:  { color: "rgba(255,255,255,0.05)" }
+        }
+      }
+    };
+
+    // SOL chart
+    if (solChart) {
+      solChart.data.labels = labels;
+      solChart.data.datasets[0].data = sols;
+      solChart.update();
+    } else {
+      solChart = new Chart(document.getElementById("sol-chart").getContext("2d"), {
+        type: "bar",
+        data: {
+          labels,
+          datasets: [{
+            label: "SOL",
+            data: sols,
+            backgroundColor: "rgba(52, 211, 153, 0.7)",
+            borderColor: "rgba(52, 211, 153, 1)",
+            borderWidth: 1,
+            borderRadius: 6,
+            borderSkipped: false
+          }]
+        },
+        options: {
+          ...sharedOptions,
+          plugins: {
+            ...sharedOptions.plugins,
+            tooltip: { callbacks: { label: ctx => `${ctx.parsed.y} SOL` } }
+          }
+        }
+      });
+    }
+
+    // Wallet chart
+    if (walletChart) {
+      walletChart.data.labels = labels;
+      walletChart.data.datasets[0].data = counts;
+      walletChart.update();
+    } else {
+      walletChart = new Chart(document.getElementById("wallet-chart").getContext("2d"), {
+        type: "bar",
+        data: {
+          labels,
+          datasets: [{
+            label: "Wallets",
+            data: counts,
+            backgroundColor: "rgba(96, 165, 250, 0.7)",
+            borderColor: "rgba(96, 165, 250, 1)",
+            borderWidth: 1,
+            borderRadius: 6,
+            borderSkipped: false
+          }]
+        },
+        options: {
+          ...sharedOptions,
+          plugins: {
+            ...sharedOptions.plugins,
+            tooltip: { callbacks: { label: ctx => `${ctx.parsed.y} wallets` } }
+          }
+        }
+      });
+    }
+
+  } catch (e) {
+    console.error("Chart update failed:", e);
+  }
 }
 
 // ─── Wallet search ───────────────────────────────────────────────
@@ -172,33 +274,30 @@ async function searchWallet() {
 // ─── Main dashboard update ───────────────────────────────────────
 async function updateDashboard() {
   try {
-    // Fetch balance + signature lists in parallel
     const [balResult, feeSigs, multisigSigs, approverSigs] = await Promise.all([
       rpc("getBalance", [FEE_WALLET]),
-      rpc("getSignaturesForAddress", [FEE_WALLET, { limit: 10 }]),
-      rpc("getSignaturesForAddress", [MULTISIG, { limit: 5 }]),
-      rpc("getSignaturesForAddress", [APPROVER, { limit: 5 }])
+      rpc("getSignaturesForAddress", [FEE_WALLET,  { limit: 10 }]),
+      rpc("getSignaturesForAddress", [MULTISIG,    { limit: 5  }]),
+      rpc("getSignaturesForAddress", [APPROVER,    { limit: 5  }])
     ]);
 
     const sol = balResult.value / 1_000_000_000;
 
-    // Stats
     document.getElementById("balance").textContent = sol.toFixed(4) + " SOL";
     document.getElementById("raised-usd").textContent =
       "$" + (sol * solPrice).toLocaleString(undefined, { maximumFractionDigits: 2 });
     document.getElementById("raised-sol").textContent = sol.toFixed(4) + " SOL collected";
     document.getElementById("count").textContent = Math.floor(sol / 0.075).toLocaleString();
 
-    // Outgoing check
     checkOutgoing(sol);
 
-    // Fee wallet txns (use signature list only — no need for full tx details here)
+    // Fee txns
     const feeList = document.getElementById("txn-list");
     feeList.innerHTML = feeSigs && feeSigs.length
       ? feeSigs.map(tx => renderFeeRow(tx)).join("")
       : '<p class="text-gray-500">No transactions found.</p>';
 
-    // Multisig full tx details
+    // Multisig activity
     const mList = document.getElementById("multisig-list");
     if (!multisigSigs || multisigSigs.length === 0) {
       mList.innerHTML = '<p class="text-gray-500">No recent activity.</p>';
@@ -207,7 +306,7 @@ async function updateDashboard() {
       mList.innerHTML = multisigTxs.map(tx => renderActivityRow(tx, MULTISIG)).join("");
     }
 
-    // Approver full tx details
+    // Approver activity
     const aList = document.getElementById("approver-list");
     if (!approverSigs || approverSigs.length === 0) {
       aList.innerHTML = '<p class="text-gray-500">No recent activity.</p>';
@@ -226,6 +325,8 @@ async function updateDashboard() {
 // ─── Init ────────────────────────────────────────────────────────
 fetchSolPrice().then(() => {
   updateDashboard();
+  updateCharts();
   setInterval(updateDashboard, 12000);
+  setInterval(updateCharts, 60000);
   setInterval(fetchSolPrice, 60000);
 });

@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Solstice $SLX Fee Monitor</title>
   <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.6.0/css/all.min.css">
 </head>
 <body class="bg-gray-950 text-white min-h-screen p-6">
@@ -41,6 +42,18 @@
       </div>
     </div>
 
+    <!-- Charts -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+      <div class="bg-gray-900 rounded-2xl p-6 border border-gray-800">
+        <h2 class="text-sm font-semibold text-gray-300 mb-4">Daily SOL Contributed</h2>
+        <canvas id="sol-chart" height="180"></canvas>
+      </div>
+      <div class="bg-gray-900 rounded-2xl p-6 border border-gray-800">
+        <h2 class="text-sm font-semibold text-gray-300 mb-4">Daily Wallets Contributing</h2>
+        <canvas id="wallet-chart" height="180"></canvas>
+      </div>
+    </div>
+
     <!-- Outgoing Alert -->
     <div id="alert-box" class="hidden bg-red-900 border border-red-500 rounded-2xl p-5 mb-6">
       <div class="flex items-center gap-3 mb-2">
@@ -68,7 +81,7 @@
     <div class="bg-gray-900 rounded-2xl p-6 border border-gray-800 mb-6">
       <div class="flex items-center justify-between mb-4">
         <h2 class="text-lg font-semibold">Recent Fee Transactions</h2>
-        <span class="text-xs text-gray-500">latest 10 • flags unusual amounts</span>
+        <span class="text-xs text-gray-500">latest 10</span>
       </div>
       <div id="txn-list" class="space-y-2 text-sm font-mono">
         <p class="text-gray-500">Loading...</p>
@@ -82,7 +95,7 @@
         <a href="https://solscan.io/account/J9iWieFzB4GbV4LVfKJT4aPY2nByi3vYuKRBCwsjeZ4t" target="_blank"
            class="text-blue-400 text-xs hover:underline">View full history</a>
       </div>
-      <p class="text-gray-500 text-xs mb-3 font-mono">J9iWieFzB4GbV4LVfKJT4aPY2nByi3vYuKRBCwsjeZ4t</p>
+      <p class="text-gray-500 text-xs mb-3 font-mono break-all">J9iWieFzB4GbV4LVfKJT4aPY2nByi3vYuKRBCwsjeZ4t</p>
       <div id="multisig-list" class="space-y-2 text-sm font-mono">
         <p class="text-gray-500">Loading...</p>
       </div>
@@ -95,7 +108,7 @@
         <a href="https://solscan.io/account/6qrp8Pv3YM9uuP4Bi17rjEsS9E8crLpfMwVLGvNRQPPr" target="_blank"
            class="text-blue-400 text-xs hover:underline">View full history</a>
       </div>
-      <p class="text-gray-500 text-xs mb-3 font-mono">6qrp8Pv3YM9uuP4Bi17rjEsS9E8crLpfMwVLGvNRQPPr</p>
+      <p class="text-gray-500 text-xs mb-3 font-mono break-all">6qrp8Pv3YM9uuP4Bi17rjEsS9E8crLpfMwVLGvNRQPPr</p>
       <div id="approver-list" class="space-y-2 text-sm font-mono">
         <p class="text-gray-500">Loading...</p>
       </div>
