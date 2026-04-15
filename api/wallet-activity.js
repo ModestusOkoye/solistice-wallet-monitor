@@ -77,12 +77,15 @@ function findParsedSystemTransferForWallet(tx, walletAddress) {
     const source = info.source;
     const destination = info.destination;
     const lamports = Number(info.lamports || 0);
+    const roundedSol = Number((lamports / 1_000_000_000).toFixed(4));
+
+    if (roundedSol <= 0) continue;
 
     if (source === walletAddress || destination === walletAddress) {
       return {
         source,
         destination,
-        amountSol: lamports / 1_000_000_000,
+        amountSol: roundedSol,
       };
     }
   }
@@ -107,16 +110,16 @@ function classifyTransaction(tx, walletAddress, role) {
     postBalances[idx] !== undefined
   ) {
     const diffLamports = Number(postBalances[idx]) - Number(preBalances[idx]);
-    const diffSol = diffLamports / 1_000_000_000;
+    const roundedDiffSol = Number((diffLamports / 1_000_000_000).toFixed(4));
 
-    if (diffSol > 0.000001) {
+    if (roundedDiffSol > 0) {
       type = "received";
       label = "Received SOL";
-      amountSol = Number(diffSol.toFixed(4));
-    } else if (diffSol < -0.000001) {
+      amountSol = roundedDiffSol;
+    } else if (roundedDiffSol < 0) {
       type = "sent";
       label = "Sent SOL";
-      amountSol = Number(Math.abs(diffSol).toFixed(4));
+      amountSol = Math.abs(roundedDiffSol);
     }
   }
 
@@ -127,11 +130,11 @@ function classifyTransaction(tx, walletAddress, role) {
       if (transfer.destination === walletAddress) {
         type = "received";
         label = "Received SOL";
-        amountSol = Number(transfer.amountSol.toFixed(4));
+        amountSol = transfer.amountSol;
       } else if (transfer.source === walletAddress) {
         type = "sent";
         label = "Sent SOL";
-        amountSol = Number(transfer.amountSol.toFixed(4));
+        amountSol = transfer.amountSol;
       }
     }
   }

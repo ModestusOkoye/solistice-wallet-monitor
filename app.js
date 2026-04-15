@@ -379,7 +379,12 @@ async function updateDashboard() {
         : "N/A"
     );
     setText("raised-sol", `${data.totalCollectedSol.toFixed(4)} SOL collected`);
-    setText("count", Number(data.registrationsEstimate).toLocaleString());
+    setText(
+   "count",
+   Number(
+    data.exactRegistrationCount ?? data.registrationsEstimate
+   ).toLocaleString()
+   );
     setText("last-update", new Date(data.fetchedAt).toLocaleTimeString());
 
     const feeList = document.getElementById("txn-list");
