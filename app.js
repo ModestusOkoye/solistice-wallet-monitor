@@ -2,6 +2,7 @@ const SUMMARY_API = "/api/summary";
 const FEE_HISTORY_API = "/api/fee-history";
 const SEARCH_WALLET_API = "/api/search-wallet";
 const WALLET_ACTIVITY_API = "/api/wallet-activity";
+const FEE_OUTFLOWS_API = "/api/fee-outflows";
 
 let solChart = null;
 let walletChart = null;
@@ -74,6 +75,18 @@ async function fetchWalletActivity() {
   return data;
 }
 
+async function fetchFeeOutflows() {
+  const response = await fetch(FEE_OUTFLOWS_API);
+  if (!response.ok) {
+    throw new Error(`Fee outflows API failed with status ${response.status}`);
+  }
+  const data = await response.json();
+  if (!data.ok) {
+    throw new Error(data.error || "Fee outflows API returned an error");
+  }
+  return data;
+}
+
 function renderFeeRow(tx) {
   const time = tx.blockTime ? timeAgo(tx.blockTime) : "--";
   const failed = tx.err !== null && tx.err !== undefined;
@@ -135,6 +148,34 @@ function renderActivityRow(item) {
          class="text-blue-400 hover:underline text-xs">${shortenSig(item.signature)}</a>
       <span class="text-gray-400 text-xs">${timeAgo(item.blockTime)}</span>
       ${badge}
+    </div>
+  `;
+}
+
+function renderOutflowRow(item) {
+  const destinationBadge = item.suspicious
+    ? '<span class="text-red-400 text-xs font-bold">Unknown destination</span>'
+    : `<span class="text-emerald-400 text-xs font-bold">${item.destinationLabel}</span>`;
+
+  return `
+    <div class="bg-gray-800 rounded-xl px-4 py-3">
+      <div class="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+        <div class="space-y-1">
+          <a href="https://solscan.io/tx/${item.signature}" target="_blank"
+             class="text-blue-400 hover:underline text-xs">${shortenSig(item.signature)}</a>
+          <div class="text-xs text-gray-400">
+            To
+            <a href="https://solscan.io/account/${item.destination}" target="_blank"
+               class="text-blue-400 hover:underline">${shortenAddress(item.destination)}</a>
+          </div>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-3">
+          <span class="text-gray-400 text-xs">${timeAgo(item.blockTime)}</span>
+          ${destinationBadge}
+          <span class="text-red-400 text-xs font-bold">-${item.amountSol} SOL</span>
+        </div>
+      </div>
     </div>
   `;
 }
@@ -349,11 +390,6 @@ async function updateDashboard() {
         feeList.innerHTML = data.recentTxs.map(renderFeeRow).join("");
       }
     }
-
-    const alertBox = document.getElementById("alert-box");
-    if (alertBox) {
-      alertBox.classList.add("hidden");
-    }
   } catch (error) {
     console.error("Dashboard update failed:", error);
 
@@ -415,10 +451,67 @@ async function updateWalletActivity() {
   }
 }
 
+async function updateFeeOutflows() {
+  const summaryEl = document.getElementById("outflow-summary");
+  const listEl = document.getElementById("outflow-list");
+  const alertBox = document.getElementById("alert-box");
+  const alertMsg = document.getElementById("alert-msg");
+
+  try {
+    const data = await fetchFeeOutflows();
+
+    if (summaryEl) {
+      if (data.totalOutflowCount === 0) {
+        summaryEl.innerHTML =
+          '<span class="text-emerald-400">No fee-wallet outflows detected in the latest scan.</span>';
+      } else {
+        summaryEl.innerHTML = `
+          <span class="text-gray-300">Detected ${data.totalOutflowCount} outflow(s) totaling ${data.totalOutflowSol} SOL.</span>
+          ${
+            data.suspiciousCount > 0
+              ? `<span class="text-red-400 font-bold"> ${data.suspiciousCount} suspicious / unknown destination(s), totaling ${data.suspiciousOutflowSol} SOL.</span>`
+              : '<span class="text-emerald-400 font-bold"> All detected destinations are known internal labels.</span>'
+          }
+        `;
+      }
+    }
+
+    if (listEl) {
+      listEl.innerHTML =
+        data.outflows && data.outflows.length
+          ? data.outflows.map(renderOutflowRow).join("")
+          : '<p class="text-gray-500">No outflows found in the latest scan.</p>';
+    }
+
+    if (alertBox && alertMsg) {
+      if (data.suspiciousCount > 0) {
+        alertBox.classList.remove("hidden");
+        alertMsg.textContent = `Suspicious fee-wallet outflows detected: ${data.suspiciousCount} unknown destination(s), totaling ${data.suspiciousOutflowSol} SOL.`;
+      } else {
+        alertBox.classList.add("hidden");
+      }
+    }
+  } catch (error) {
+    console.error("Fee outflow update failed:", error);
+
+    if (summaryEl) {
+      summaryEl.innerHTML =
+        '<span class="text-red-400">Failed to load fee-wallet outflow summary.</span>';
+    }
+
+    if (listEl) {
+      listEl.innerHTML =
+        '<p class="text-red-400">Failed to load fee-wallet outflows.</p>';
+    }
+  }
+}
+
 updateDashboard();
 updateCharts();
 updateWalletActivity();
+updateFeeOutflows();
 
 setInterval(updateDashboard, 12000);
 setInterval(updateCharts, 60000);
 setInterval(updateWalletActivity, 30000);
+setInterval(updateFeeOutflows, 30000);
