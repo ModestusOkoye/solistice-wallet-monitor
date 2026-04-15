@@ -36,6 +36,47 @@ async function heliusRpc(method, params) {
   return data.result;
 }
 
+async function fetchSolPriceUsd() {
+  try {
+    const response = await fetch(COINGECKO_URL, {
+      headers: {
+        Accept: "application/json",
+      },
+    });
+
+    if (!response.ok) {
+      return {
+        solUsd: null,
+        priceSource: "coingecko",
+        priceError: `CoinGecko HTTP ${response.status}`,
+      };
+    }
+
+    const data = await response.json();
+    const solUsd = data?.solana?.usd;
+
+    if (typeof solUsd !== "number") {
+      return {
+        solUsd: null,
+        priceSource: "coingecko",
+        priceError: "SOL price missing in CoinGecko response",
+      };
+    }
+
+    return {
+      solUsd,
+      priceSource: "coingecko",
+      priceError: null,
+    };
+  } catch (error) {
+    return {
+      solUsd: null,
+      priceSource: "coingecko",
+      priceError: error.message || "Unknown CoinGecko fetch error",
+    };
+  }
+}
+
 export default async function handler(req, res) {
   if (req.method !== "GET") {
     return res.status(405).json({
@@ -45,18 +86,16 @@ export default async function handler(req, res) {
   }
 
   try {
-    const [balanceResult, signaturesResult, priceResult] = await Promise.all([
+    const [balanceResult, signaturesResult, priceInfo] = await Promise.all([
       heliusRpc("getBalance", [FEE_WALLET]),
       heliusRpc("getSignaturesForAddress", [FEE_WALLET, { limit: 10 }]),
-      fetch(COINGECKO_URL)
-        .then((r) => (r.ok ? r.json() : null))
-        .catch(() => null),
+      fetchSolPriceUsd(),
     ]);
 
     const balanceLamports = balanceResult?.value ?? 0;
     const balanceSol = balanceLamports / 1_000_000_000;
 
-    const solUsd = priceResult?.solana?.usd ?? null;
+    const solUsd = priceInfo.solUsd;
     const totalCollectedUsd =
       solUsd !== null ? Number((balanceSol * solUsd).toFixed(2)) : null;
 
@@ -73,6 +112,9 @@ export default async function handler(req, res) {
       balanceSol: Number(balanceSol.toFixed(4)),
       totalCollectedSol: Number(balanceSol.toFixed(4)),
       totalCollectedUsd,
+      solUsd,
+      priceSource: priceInfo.priceSource,
+      priceError: priceInfo.priceError,
       registrationsEstimate: Math.floor(balanceSol / EXPECTED_FEE_SOL),
       recentTxs,
       fetchedAt: new Date().toISOString(),
