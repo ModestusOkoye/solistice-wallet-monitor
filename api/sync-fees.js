@@ -12,7 +12,7 @@ const FEE_TOLERANCE_SOL = 0.001;
 
 const SIGNATURE_PAGE_SIZE = 100;
 const MAX_PAGES = 10;
-const TX_BATCH_SIZE = 20;
+const TX_BATCH_SIZE = 5;
 const RECENT_FEE_TX_LIMIT = 10;
 const RECENT_OUTFLOW_LIMIT = 15;
 
@@ -208,34 +208,71 @@ async function fetchNewSignatureObjects(lastProcessedSignature) {
   return collected.reverse();
 }
 
+async function fetchSingleTransaction(sigObj) {
+  try {
+    const tx = await heliusRpc("getTransaction", [
+      sigObj.signature,
+      {
+        encoding: "jsonParsed",
+        maxSupportedTransactionVersion: 0,
+      },
+    ]);
+
+    if (!tx) return null;
+
+    return {
+      ...tx,
+      signature: sigObj.signature,
+      blockTime: sigObj.blockTime || tx.blockTime || null,
+    };
+  } catch {
+    return null;
+  }
+}
+
 async function fetchTransactionsFromSignatures(signatureObjects) {
   const successful = signatureObjects.filter((sig) => sig.err === null);
   const chunks = chunkArray(successful, TX_BATCH_SIZE);
   const transactions = [];
 
   for (const chunk of chunks) {
-    const results = await heliusRpcBatch(
-      chunk.map((sigObj) => ({
-        method: "getTransaction",
-        params: [
-          sigObj.signature,
-          {
-            encoding: "jsonParsed",
-            maxSupportedTransactionVersion: 0,
-          },
-        ],
-      }))
-    );
+    try {
+      const results = await heliusRpcBatch(
+        chunk.map((sigObj) => ({
+          method: "getTransaction",
+          params: [
+            sigObj.signature,
+            {
+              encoding: "jsonParsed",
+              maxSupportedTransactionVersion: 0,
+            },
+          ],
+        }))
+      );
 
-    results.forEach((tx, index) => {
-      if (!tx) return;
+      results.forEach((tx, index) => {
+        if (!tx) return;
 
-      transactions.push({
-        ...tx,
-        signature: chunk[index].signature,
-        blockTime: chunk[index].blockTime || tx.blockTime || null,
+        transactions.push({
+          ...tx,
+          signature: chunk[index].signature,
+          blockTime: chunk[index].blockTime || tx.blockTime || null,
+        });
       });
-    });
+    } catch (error) {
+      const message = String(error?.message || "");
+
+      if (!message.includes("413")) {
+        throw error;
+      }
+
+      for (const sigObj of chunk) {
+        const tx = await fetchSingleTransaction(sigObj);
+        if (tx) {
+          transactions.push(tx);
+        }
+      }
+    }
   }
 
   return transactions;
