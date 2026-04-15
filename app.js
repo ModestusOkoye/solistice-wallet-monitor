@@ -1,11 +1,16 @@
 const SUMMARY_API = "/api/summary";
 const FEE_HISTORY_API = "/api/fee-history";
+const SEARCH_WALLET_API = "/api/search-wallet";
 
 let solChart = null;
 let walletChart = null;
 
 function shortenSig(sig) {
   return sig.slice(0, 8) + "..." + sig.slice(-6);
+}
+
+function shortenAddress(address) {
+  return address.slice(0, 8) + "..." + address.slice(-6);
 }
 
 function timeAgo(ts) {
@@ -51,6 +56,20 @@ async function fetchFeeHistory() {
   return data;
 }
 
+async function fetchWalletSearch(address) {
+  const response = await fetch(
+    `${SEARCH_WALLET_API}?address=${encodeURIComponent(address)}`
+  );
+
+  const data = await response.json();
+
+  if (!response.ok || !data.ok) {
+    throw new Error(data.error || `Wallet search failed with status ${response.status}`);
+  }
+
+  return data;
+}
+
 function renderFeeRow(tx) {
   const time = tx.blockTime ? timeAgo(tx.blockTime) : "--";
   const failed = tx.err !== null && tx.err !== undefined;
@@ -67,6 +86,30 @@ function renderFeeRow(tx) {
           ? '<span class="text-red-400 font-bold text-xs">⚠ FAILED TX</span>'
           : '<span class="text-emerald-400 font-bold text-xs">+0.075 SOL</span>'
       }
+    </div>
+  `;
+}
+
+function renderSearchMatches(matches) {
+  if (!matches || matches.length === 0) {
+    return "";
+  }
+
+  return `
+    <div class="mt-4 space-y-2">
+      <p class="text-sm text-gray-400">Recent matching contributions</p>
+      ${matches
+        .map(
+          (match) => `
+          <div class="flex items-center justify-between bg-gray-800 rounded-xl px-4 py-2">
+            <a href="https://solscan.io/tx/${match.signature}" target="_blank"
+               class="text-blue-400 hover:underline text-xs">${shortenSig(match.signature)}</a>
+            <span class="text-gray-400 text-xs">${timeAgo(match.blockTime)}</span>
+            <span class="text-emerald-400 font-bold text-xs">+${match.amountSol} SOL</span>
+          </div>
+        `
+        )
+        .join("")}
     </div>
   `;
 }
@@ -91,11 +134,64 @@ function initializePlaceholders() {
 }
 
 async function searchWallet() {
+  const input = document.getElementById("search-input");
   const resultBox = document.getElementById("search-result");
-  if (resultBox) {
+
+  if (!input || !resultBox) return;
+
+  const address = input.value.trim();
+
+  if (!address) {
     resultBox.innerHTML = `
       <div class="bg-gray-800 border border-gray-700 rounded-xl px-4 py-3">
-        <p class="text-gray-300 text-sm">Wallet search will be connected in the next step.</p>
+        <p class="text-gray-300 text-sm">Please paste a Solana wallet address first.</p>
+      </div>
+    `;
+    return;
+  }
+
+  resultBox.innerHTML = `
+    <div class="bg-gray-800 border border-gray-700 rounded-xl px-4 py-3">
+      <p class="text-gray-300 text-sm">Searching wallet contributions...</p>
+    </div>
+  `;
+
+  try {
+    const data = await fetchWalletSearch(address);
+
+    if (!data.found) {
+      resultBox.innerHTML = `
+        <div class="bg-gray-800 border border-gray-700 rounded-xl px-4 py-3">
+          <p class="text-gray-300 text-sm">No contribution found for this wallet in the current search window.</p>
+          <p class="text-gray-500 text-xs mt-1">Scanned ${data.scannedSignatures} wallet signatures.</p>
+        </div>
+      `;
+      return;
+    }
+
+    resultBox.innerHTML = `
+      <div class="bg-emerald-950 border border-emerald-700 rounded-xl px-4 py-3">
+        <p class="text-emerald-300 font-bold text-sm">Wallet contribution found</p>
+        <div class="mt-2 space-y-1 text-sm">
+          <p class="text-gray-200"><span class="text-gray-400">Wallet:</span> ${shortenAddress(
+            data.searchedWallet
+          )}</p>
+          <p class="text-gray-200"><span class="text-gray-400">Matches:</span> ${data.contributionCount}</p>
+          <p class="text-gray-200"><span class="text-gray-400">Total contributed:</span> ${data.totalContributedSol} SOL</p>
+          <p class="text-gray-200"><span class="text-gray-400">First contribution:</span> ${timeAgo(
+            data.firstContributionAt
+          )}</p>
+          <p class="text-gray-200"><span class="text-gray-400">Latest contribution:</span> ${timeAgo(
+            data.lastContributionAt
+          )}</p>
+        </div>
+      </div>
+      ${renderSearchMatches(data.matches)}
+    `;
+  } catch (error) {
+    resultBox.innerHTML = `
+      <div class="bg-red-950 border border-red-700 rounded-xl px-4 py-3">
+        <p class="text-red-300 text-sm">${error.message}</p>
       </div>
     `;
   }
