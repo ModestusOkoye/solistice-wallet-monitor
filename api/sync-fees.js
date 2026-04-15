@@ -10,9 +10,11 @@ const CREATION_SIGNATURE =
 const EXPECTED_FEE_SOL = 0.075;
 const FEE_TOLERANCE_SOL = 0.001;
 
-const SIGNATURE_PAGE_SIZE = 100;
-const MAX_PAGES = 10;
-const TX_BATCH_SIZE = 5;
+const SIGNATURE_PAGE_SIZE = 25;
+const MAX_PAGES = 2;
+const MAX_TXS_PER_SYNC = 20;
+const TX_DELAY_MS = 400;
+
 const RECENT_FEE_TX_LIMIT = 10;
 const RECENT_OUTFLOW_LIMIT = 15;
 
@@ -23,12 +25,8 @@ const KNOWN_DESTINATIONS = {
   [FEE_WALLET]: "Fee wallet",
 };
 
-function chunkArray(arr, size) {
-  const chunks = [];
-  for (let i = 0; i < arr.length; i += size) {
-    chunks.push(arr.slice(i, i + size));
-  }
-  return chunks;
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function heliusRpc(method, params) {
@@ -62,47 +60,6 @@ async function heliusRpc(method, params) {
   }
 
   return data.result;
-}
-
-async function heliusRpcBatch(calls) {
-  const apiKey = process.env.HELIUS_API_KEY;
-
-  if (!apiKey) {
-    throw new Error("Missing HELIUS_API_KEY environment variable");
-  }
-
-  const payload = calls.map((call, index) => ({
-    jsonrpc: "2.0",
-    id: index + 1,
-    method: call.method,
-    params: call.params,
-  }));
-
-  const response = await fetch(`https://mainnet.helius-rpc.com/?api-key=${apiKey}`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(payload),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Helius batch HTTP error: ${response.status}`);
-  }
-
-  const data = await response.json();
-
-  if (!Array.isArray(data)) {
-    throw new Error("Unexpected Helius batch response");
-  }
-
-  const byId = new Map(data.map((item) => [item.id, item]));
-
-  return calls.map((_, index) => {
-    const item = byId.get(index + 1);
-    if (!item || item.error) return null;
-    return item.result;
-  });
 }
 
 function extractAllInstructions(tx) {
@@ -203,6 +160,7 @@ async function fetchNewSignatureObjects(lastProcessedSignature) {
     if (batch.length < SIGNATURE_PAGE_SIZE) break;
 
     before = batch[batch.length - 1].signature;
+    await sleep(300);
   }
 
   return collected.reverse();
@@ -225,57 +183,46 @@ async function fetchSingleTransaction(sigObj) {
       signature: sigObj.signature,
       blockTime: sigObj.blockTime || tx.blockTime || null,
     };
-  } catch {
+  } catch (error) {
+    const message = String(error?.message || "");
+
+    if (message.includes("429") || message.includes("403")) {
+      return {
+        skipped: true,
+        signature: sigObj.signature,
+        blockTime: sigObj.blockTime || null,
+      };
+    }
+
     return null;
   }
 }
 
 async function fetchTransactionsFromSignatures(signatureObjects) {
-  const successful = signatureObjects.filter((sig) => sig.err === null);
-  const chunks = chunkArray(successful, TX_BATCH_SIZE);
+  const successful = signatureObjects
+    .filter((sig) => sig.err === null)
+    .slice(0, MAX_TXS_PER_SYNC);
+
   const transactions = [];
+  let skippedCount = 0;
 
-  for (const chunk of chunks) {
-    try {
-      const results = await heliusRpcBatch(
-        chunk.map((sigObj) => ({
-          method: "getTransaction",
-          params: [
-            sigObj.signature,
-            {
-              encoding: "jsonParsed",
-              maxSupportedTransactionVersion: 0,
-            },
-          ],
-        }))
-      );
+  for (const sigObj of successful) {
+    const tx = await fetchSingleTransaction(sigObj);
 
-      results.forEach((tx, index) => {
-        if (!tx) return;
-
-        transactions.push({
-          ...tx,
-          signature: chunk[index].signature,
-          blockTime: chunk[index].blockTime || tx.blockTime || null,
-        });
-      });
-    } catch (error) {
-      const message = String(error?.message || "");
-
-      if (!message.includes("413")) {
-        throw error;
-      }
-
-      for (const sigObj of chunk) {
-        const tx = await fetchSingleTransaction(sigObj);
-        if (tx) {
-          transactions.push(tx);
-        }
-      }
+    if (tx?.skipped) {
+      skippedCount += 1;
+    } else if (tx) {
+      transactions.push(tx);
     }
+
+    await sleep(TX_DELAY_MS);
   }
 
-  return transactions;
+  return {
+    transactions,
+    skippedCount,
+    attemptedCount: successful.length,
+  };
 }
 
 export default async function handler(req, res) {
@@ -307,11 +254,14 @@ export default async function handler(req, res) {
         ok: true,
         message: "No new fee-wallet transactions found",
         processedTransactions: 0,
+        attemptedTransactions: 0,
+        skippedTransactions: 0,
         state: unchangedState,
       });
     }
 
-    const transactions = await fetchTransactionsFromSignatures(newSignatureObjects);
+    const { transactions, skippedCount, attemptedCount } =
+      await fetchTransactionsFromSignatures(newSignatureObjects);
 
     const nextState = loadState();
     const contributorSet = new Set();
@@ -384,8 +334,13 @@ export default async function handler(req, res) {
 
     return res.status(200).json({
       ok: true,
-      message: "Sync completed",
+      message:
+        skippedCount > 0
+          ? "Sync completed with some rate-limited transaction fetches skipped"
+          : "Sync completed",
       processedTransactions: transactions.length,
+      attemptedTransactions: attemptedCount,
+      skippedTransactions: skippedCount,
       newSignatures: newSignatureObjects.length,
       lastProcessedSignature: nextState.meta.lastProcessedSignature,
       state: nextState,
