@@ -24,6 +24,46 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function getDayKey(blockTime) {
+  if (!blockTime) {
+    return new Date().toISOString().slice(0, 10);
+  }
+
+  return new Date(blockTime * 1000).toISOString().slice(0, 10);
+}
+
+function ensureDailyBucket(state, dayKey) {
+  if (!state.history) {
+    state.history = { daily: {} };
+  }
+
+  if (!state.history.daily) {
+    state.history.daily = {};
+  }
+
+  if (!state.history.daily[dayKey]) {
+    state.history.daily[dayKey] = {
+      feeTxCount: 0,
+      feeSol: 0,
+      contributorAddresses: [],
+    };
+  }
+
+  return state.history.daily[dayKey];
+}
+
+function addContributionToDailyHistory(state, tx, transfer) {
+  const dayKey = getDayKey(tx.blockTime);
+  const bucket = ensureDailyBucket(state, dayKey);
+
+  bucket.feeTxCount += 1;
+  bucket.feeSol = Number((bucket.feeSol + transfer.amountSol).toFixed(6));
+
+  if (transfer.source && !bucket.contributorAddresses.includes(transfer.source)) {
+    bucket.contributorAddresses.push(transfer.source);
+  }
+}
+
 async function heliusRpc(method, params) {
   const apiKey = process.env.HELIUS_API_KEY;
 
@@ -245,6 +285,8 @@ export default async function handler(req, res) {
             nextState.registrations.feeLikeInboundSol = Number(
               (nextState.registrations.feeLikeInboundSol + transfer.amountSol).toFixed(6)
             );
+
+            addContributionToDailyHistory(nextState, tx, transfer);
 
             if (transfer.source) {
               contributorSet.add(transfer.source);
