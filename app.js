@@ -1,5 +1,5 @@
 const FEE_WALLET = "DuX1wcoQrJ6XypxLNq3GRrmHFAAMgCqAKbzboabyCtzB";
-const RPC = "https://api.mainnet-beta.solana.com";
+const RPC = "https://rpc.ankr.com/solana";
 
 let solPrice = 84;
 
