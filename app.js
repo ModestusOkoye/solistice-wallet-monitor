@@ -1,5 +1,5 @@
 const FEE_WALLET = "DuX1wcoQrJ6XypxLNq3GRrmHFAAMgCqAKbzboabyCtzB";
-const RPC = "https://rpc.ankr.com/solana";
+const RPC = "https://mainnet.helius-rpc.com/?api-key=52da5414-0bf9-4d8a-a9a8-3484e52724c1";
 
 let solPrice = 84;
 
