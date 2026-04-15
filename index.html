@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Solstice $SLX Fee Monitor</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.6.0/css/all.min.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="bg-gray-950 text-white min-h-screen p-6">
+
+  <div class="max-w-5xl mx-auto">
+
+    <div class="flex items-center justify-between mb-2">
+      <h1 class="text-3xl font-bold flex items-center gap-3">
+        <i class="fas fa-satellite-dish text-emerald-400"></i>
+        Solstice $SLX Fee Monitor
+      </h1>
+      <span class="flex items-center gap-2 bg-emerald-900 text-emerald-400 text-sm px-3 py-1 rounded-full font-medium">
+        <span class="w-2 h-2 bg-emerald-400 rounded-full animate-pulse"></span> LIVE
+      </span>
+    </div>
+    <p class="text-gray-500 text-sm mb-8">Auto-refreshes every 12 seconds. Data pulled directly from Solana mainnet.</p>
+
+    <!-- Stats -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+      <div class="bg-gray-900 rounded-2xl p-6 border border-gray-800">
+        <p class="text-gray-400 text-sm mb-1">Current Balance</p>
+        <p id="balance" class="text-4xl font-mono font-bold text-emerald-400">--</p>
+        <p class="text-gray-500 text-xs mt-1">fee wallet SOL balance</p>
+      </div>
+      <div class="bg-gray-900 rounded-2xl p-6 border border-gray-800">
+        <p class="text-gray-400 text-sm mb-1">Total Collected</p>
+        <p id="raised-usd" class="text-4xl font-mono font-bold text-yellow-400">--</p>
+        <p class="text-gray-500 text-xs mt-1" id="raised-sol">calculating...</p>
+      </div>
+      <div class="bg-gray-900 rounded-2xl p-6 border border-gray-800">
+        <p class="text-gray-400 text-sm mb-1">Registrations</p>
+        <p id="count" class="text-4xl font-mono font-bold text-blue-400">--</p>
+        <p class="text-gray-500 text-xs mt-1">wallets paid 0.075 SOL</p>
+      </div>
+    </div>
+
+    <!-- Recent Txns -->
+    <div class="bg-gray-900 rounded-2xl p-6 border border-gray-800 mb-6">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-lg font-semibold">Recent Incoming Fees</h2>
+        <span class="text-xs text-gray-500">latest 10 transactions</span>
+      </div>
+      <div id="txn-list" class="space-y-2 text-sm font-mono">
+        <p class="text-gray-500">Loading transactions...</p>
+      </div>
+    </div>
+
+    <!-- Address Cards -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+      <div class="bg-gray-900 rounded-2xl p-6 border border-gray-800">
+        <p class="text-gray-400 text-xs mb-1 uppercase tracking-widest">Fee Wallet</p>
+        <p class="font-mono text-xs break-all text-white mb-3">DuX1wcoQrJ6XypxLNq3GRrmHFAAMgCqAKbzboabyCtzB</p>
+        <a href="https://solscan.io/account/DuX1wcoQrJ6XypxLNq3GRrmHFAAMgCqAKbzboabyCtzB" target="_blank"
+           class="text-blue-400 text-sm hover:underline flex items-center gap-1">
+          View on Solscan <i class="fas fa-external-link-alt text-xs"></i>
+        </a>
+      </div>
+      <div class="bg-gray-900 rounded-2xl p-6 border border-gray-800">
+        <p class="text-gray-400 text-xs mb-1 uppercase tracking-widest">Spender / Approver Wallet</p>
+        <p class="font-mono text-xs break-all text-white mb-3">6qrp8Pv3YM9uuP4Bi17rjEsS9E8crLpfMwVLGvNRQPPr</p>
+        <a href="https://solscan.io/account/6qrp8Pv3YM9uuP4Bi17rjEsS9E8crLpfMwVLGvNRQPPr" target="_blank"
+           class="text-blue-400 text-sm hover:underline flex items-center gap-1">
+          View on Solscan <i class="fas fa-external-link-alt text-xs"></i>
+        </a>
+      </div>
+    </div>
+
+    <!-- Multisig -->
+    <div class="bg-gray-900 rounded-2xl p-6 border border-emerald-900 mb-8">
+      <p class="text-gray-400 text-xs mb-1 uppercase tracking-widest">Squads V4 Multisig (controls outflows)</p>
+      <p class="font-mono text-xs break-all text-white mb-3">J9iWieFzB4GbV4LVfKJT4aPY2nByi3vYuKRBCwsjeZ4t</p>
+      <p class="text-gray-400 text-sm mb-4">Group safe. Multiple approvals required before any funds can leave.</p>
+      <div class="flex gap-3 flex-wrap">
+        <a href="https://app.squads.so/multisig/J9iWieFzB4GbV4LVfKJT4aPY2nByi3vYuKRBCwsjeZ4t" target="_blank"
+           class="bg-emerald-700 hover:bg-emerald-600 text-white px-5 py-2 rounded-xl text-sm font-medium flex items-center gap-2">
+          <i class="fas fa-users"></i> Open Multisig Dashboard
+        </a>
+        <a href="https://solscan.io/account/J9iWieFzB4GbV4LVfKJT4aPY2nByi3vYuKRBCwsjeZ4t" target="_blank"
+           class="border border-gray-700 hover:border-gray-500 text-gray-300 px-5 py-2 rounded-xl text-sm font-medium flex items-center gap-2">
+          View on Solscan <i class="fas fa-external-link-alt text-xs"></i>
+        </a>
+      </div>
+    </div>
+
+    <p class="text-center text-gray-600 text-xs">Last updated: <span id="last-update">--</span></p>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
