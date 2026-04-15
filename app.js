@@ -31,10 +31,12 @@ async function fetchSummary() {
   if (!response.ok) {
     throw new Error(`Summary API failed with status ${response.status}`);
   }
+
   const data = await response.json();
   if (!data.ok) {
     throw new Error(data.error || "Summary API returned an error");
   }
+
   return data;
 }
 
@@ -43,10 +45,12 @@ async function fetchFeeHistory() {
   if (!response.ok) {
     throw new Error(`Fee history API failed with status ${response.status}`);
   }
+
   const data = await response.json();
   if (!data.ok) {
     throw new Error(data.error || "Fee history API returned an error");
   }
+
   return data;
 }
 
@@ -54,6 +58,7 @@ async function fetchWalletSearch(address) {
   const response = await fetch(
     `${SEARCH_WALLET_API}?address=${encodeURIComponent(address)}`
   );
+
   const data = await response.json();
 
   if (!response.ok || !data.ok) {
@@ -68,10 +73,12 @@ async function fetchWalletActivity() {
   if (!response.ok) {
     throw new Error(`Wallet activity API failed with status ${response.status}`);
   }
+
   const data = await response.json();
   if (!data.ok) {
     throw new Error(data.error || "Wallet activity API returned an error");
   }
+
   return data;
 }
 
@@ -80,10 +87,12 @@ async function fetchFeeOutflows() {
   if (!response.ok) {
     throw new Error(`Fee outflows API failed with status ${response.status}`);
   }
+
   const data = await response.json();
   if (!data.ok) {
     throw new Error(data.error || "Fee outflows API returned an error");
   }
+
   return data;
 }
 
@@ -258,9 +267,7 @@ function renderCharts(labels, dailySol, dailyWalletsContributing) {
   const solCtx = document.getElementById("sol-chart");
   const walletCtx = document.getElementById("wallet-chart");
 
-  if (!solCtx || !walletCtx) {
-    return;
-  }
+  if (!solCtx || !walletCtx) return;
 
   const sharedOptions = {
     responsive: true,
@@ -379,12 +386,17 @@ async function updateDashboard() {
         : "N/A"
     );
     setText("raised-sol", `${data.totalCollectedSol.toFixed(4)} SOL collected`);
+
     setText(
-   "count",
-   Number(
-    data.exactRegistrationCount ?? data.registrationsEstimate
-   ).toLocaleString()
-   );
+      "count",
+      Number(data.registrationsEstimate || 0).toLocaleString()
+    );
+
+    setText(
+      "count-note",
+      `exact synced so far: ${Number(data.exactRegistrationCount || 0).toLocaleString()}`
+    );
+
     setText("last-update", new Date(data.fetchedAt).toLocaleTimeString());
 
     const feeList = document.getElementById("txn-list");
@@ -408,6 +420,7 @@ async function updateDashboard() {
     setText("raised-usd", "--");
     setText("raised-sol", "unable to load");
     setText("count", "--");
+    setText("count-note", "unable to load registration estimate");
     setText("last-update", "--");
   }
 }
@@ -510,6 +523,8 @@ async function updateFeeOutflows() {
     }
   }
 }
+
+window.searchWallet = searchWallet;
 
 updateDashboard();
 updateCharts();
