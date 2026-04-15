@@ -2,10 +2,7 @@ import { loadState, mergeState } from "../lib/state";
 
 const FEE_WALLET = "DuX1wcoQrJ6XypxLNq3GRrmHFAAMgCqAKbzboabyCtzB";
 const EXPECTED_FEE_SOL = 0.075;
-const COINGECKO_URL =
-  "https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd";
-
-const PRICE_TTL_MS = 30 * 60 * 1000;
+const PRICE_CACHE_TTL_MS = 30 * 60 * 1000;
 
 async function heliusRpc(method, params) {
   const apiKey = process.env.HELIUS_API_KEY;
@@ -40,124 +37,36 @@ async function heliusRpc(method, params) {
   return data.result;
 }
 
-async function fetchFreshSolPriceUsd() {
-  try {
-    const response = await fetch(COINGECKO_URL, {
-      headers: {
-        Accept: "application/json",
-      },
-    });
+async function fetchSolPriceFromCoinGecko() {
+  const response = await fetch(
+    "https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd"
+  );
 
-    if (!response.ok) {
-      return {
-        solUsd: null,
-        source: "coingecko",
-        error: `CoinGecko HTTP ${response.status}`,
-      };
-    }
-
-    const data = await response.json();
-    const solUsd = data?.solana?.usd;
-
-    if (typeof solUsd !== "number") {
-      return {
-        solUsd: null,
-        source: "coingecko",
-        error: "SOL price missing in CoinGecko response",
-      };
-    }
-
-    return {
-      solUsd,
-      source: "coingecko",
-      error: null,
-    };
-  } catch (error) {
-    return {
-      solUsd: null,
-      source: "coingecko",
-      error: error.message || "Unknown CoinGecko fetch error",
-    };
+  if (!response.ok) {
+    throw new Error(`CoinGecko HTTP ${response.status}`);
   }
+
+  const data = await response.json();
+  const solUsd = data?.solana?.usd;
+
+  if (typeof solUsd !== "number") {
+    throw new Error("CoinGecko returned an invalid SOL price");
+  }
+
+  return Number(solUsd);
 }
 
-async function getPriceFromState() {
-  const state = loadState();
-  const now = Date.now();
-
-  const cachedSolUsd = state.price?.solUsd ?? null;
-  const cachedFetchedAt = state.price?.fetchedAt
-    ? new Date(state.price.fetchedAt).getTime()
-    : 0;
-
-  const cacheIsFresh =
-    cachedSolUsd !== null &&
-    cachedFetchedAt &&
-    now - cachedFetchedAt < PRICE_TTL_MS;
-
-  if (cacheIsFresh) {
-    return {
-      solUsd: cachedSolUsd,
-      priceSource: state.price.source,
-      priceError: null,
-      priceFetchedAt: state.price.fetchedAt,
-      priceFromCache: true,
-      priceStale: false,
-    };
+function isFreshPrice(priceState) {
+  if (!priceState?.fetchedAt || priceState?.solUsd == null) {
+    return false;
   }
 
-  const fresh = await fetchFreshSolPriceUsd();
-
-  if (fresh.solUsd !== null) {
-    const fetchedAt = new Date().toISOString();
-
-    mergeState({
-      price: {
-        solUsd: fresh.solUsd,
-        fetchedAt,
-        source: fresh.source,
-        stale: false,
-        error: null,
-      },
-    });
-
-    return {
-      solUsd: fresh.solUsd,
-      priceSource: fresh.source,
-      priceError: null,
-      priceFetchedAt: fetchedAt,
-      priceFromCache: false,
-      priceStale: false,
-    };
+  const fetchedAtMs = new Date(priceState.fetchedAt).getTime();
+  if (Number.isNaN(fetchedAtMs)) {
+    return false;
   }
 
-  if (cachedSolUsd !== null) {
-    mergeState({
-      price: {
-        ...state.price,
-        stale: true,
-        error: fresh.error,
-      },
-    });
-
-    return {
-      solUsd: cachedSolUsd,
-      priceSource: state.price.source,
-      priceError: fresh.error,
-      priceFetchedAt: state.price.fetchedAt,
-      priceFromCache: true,
-      priceStale: true,
-    };
-  }
-
-  return {
-    solUsd: null,
-    priceSource: fresh.source,
-    priceError: fresh.error,
-    priceFetchedAt: null,
-    priceFromCache: false,
-    priceStale: false,
-  };
+  return Date.now() - fetchedAtMs < PRICE_CACHE_TTL_MS;
 }
 
 export default async function handler(req, res) {
@@ -169,57 +78,107 @@ export default async function handler(req, res) {
   }
 
   try {
-    const [balanceResult, priceInfo] = await Promise.all([
-      heliusRpc("getBalance", [FEE_WALLET]),
-      getPriceFromState(),
-    ]);
+    let state = await loadState();
 
-    const state = loadState();
+    const balanceResult = await heliusRpc("getBalance", [FEE_WALLET]);
+    const balanceSol = Number((balanceResult.value / 1_000_000_000).toFixed(4));
 
-    const balanceLamports = balanceResult?.value ?? 0;
-    const balanceSol = balanceLamports / 1_000_000_000;
+    let solUsd = null;
+    let priceSource = state.price?.source || null;
+    let priceError = null;
+    let priceFetchedAt = state.price?.fetchedAt || null;
+    let priceFromCache = false;
+    let priceStale = false;
 
+    if (isFreshPrice(state.price)) {
+      solUsd = Number(state.price.solUsd);
+      priceSource = state.price.source || "cache";
+      priceFetchedAt = state.price.fetchedAt;
+      priceFromCache = true;
+      priceStale = false;
+    } else {
+      try {
+        solUsd = await fetchSolPriceFromCoinGecko();
+        priceSource = "coingecko";
+        priceFetchedAt = new Date().toISOString();
+        priceFromCache = false;
+        priceStale = false;
+        priceError = null;
+
+        await mergeState({
+          price: {
+            solUsd,
+            fetchedAt: priceFetchedAt,
+            source: priceSource,
+            stale: false,
+            error: null,
+          },
+        });
+
+        state = await loadState();
+      } catch (error) {
+        priceError = error.message || "Failed to fetch SOL price";
+
+        if (state.price?.solUsd != null) {
+          solUsd = Number(state.price.solUsd);
+          priceSource = state.price.source || "cache";
+          priceFetchedAt = state.price.fetchedAt || null;
+          priceFromCache = true;
+          priceStale = true;
+
+          await mergeState({
+            price: {
+              ...state.price,
+              stale: true,
+              error: priceError,
+            },
+          });
+
+          state = await loadState();
+        } else {
+          solUsd = null;
+          priceSource = "coingecko";
+          priceFetchedAt = null;
+          priceFromCache = false;
+          priceStale = true;
+        }
+      }
+    }
+
+    const totalCollectedSol = balanceSol;
     const totalCollectedUsd =
-      priceInfo.solUsd !== null
-        ? Number((balanceSol * priceInfo.solUsd).toFixed(2))
-        : null;
+      solUsd != null ? Number((totalCollectedSol * solUsd).toFixed(2)) : null;
 
     return res.status(200).json({
       ok: true,
       wallet: FEE_WALLET,
       expectedFeeSol: EXPECTED_FEE_SOL,
-
-      balanceSol: Number(balanceSol.toFixed(4)),
-      totalCollectedSol: Number(balanceSol.toFixed(4)),
+      balanceSol,
+      totalCollectedSol,
       totalCollectedUsd,
-
-      solUsd: priceInfo.solUsd,
-      priceSource: priceInfo.priceSource,
-      priceError: priceInfo.priceError,
-      priceFetchedAt: priceInfo.priceFetchedAt,
-      priceFromCache: priceInfo.priceFromCache,
-      priceStale: priceInfo.priceStale,
-
-      exactRegistrationCount: state.registrations.exactRegistrationCount,
-      uniqueContributorCount: state.registrations.uniqueContributorCount,
-      feeLikeInboundSol: state.registrations.feeLikeInboundSol,
-      registrationScanCount: state.registrations.signaturesScanned,
-      registrationHistoryLimitReached: state.registrations.historyLimitReached,
-
-      registrationsEstimate: Math.floor(balanceSol / EXPECTED_FEE_SOL),
-
-      recentTxs: state.recent.feeTxs || [],
-
-      lastSyncedAt: state.meta.lastSyncedAt,
-      lastProcessedSignature: state.meta.lastProcessedSignature,
-      syncRuns: state.meta.syncRuns,
-
+      solUsd,
+      priceSource,
+      priceError,
+      priceFetchedAt,
+      priceFromCache,
+      priceStale,
+      exactRegistrationCount: state.registrations?.exactRegistrationCount || 0,
+      uniqueContributorCount: state.registrations?.uniqueContributorCount || 0,
+      feeLikeInboundSol: state.registrations?.feeLikeInboundSol || 0,
+      registrationScanCount: state.registrations?.signaturesScanned || 0,
+      registrationHistoryLimitReached:
+        state.registrations?.historyLimitReached || false,
+      registrationsEstimate: Math.floor(totalCollectedSol / EXPECTED_FEE_SOL),
+      recentTxs: state.recent?.feeTxs || [],
+      lastSyncedAt: state.meta?.lastSyncedAt || null,
+      lastProcessedSignature: state.meta?.lastProcessedSignature || null,
+      syncRuns: state.meta?.syncRuns || 0,
       fetchedAt: new Date().toISOString(),
     });
   } catch (error) {
     return res.status(500).json({
       ok: false,
-      error: error.message || "Unknown server error",
+      error: error.message || "Unknown summary error",
     });
   }
 }

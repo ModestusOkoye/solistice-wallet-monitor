@@ -234,7 +234,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    const currentState = loadState();
+    const currentState = await loadState();
     const lastProcessedSignature = currentState.meta.lastProcessedSignature;
 
     const newSignatureObjects = await fetchNewSignatureObjects(lastProcessedSignature);
@@ -248,7 +248,7 @@ export default async function handler(req, res) {
         },
       };
 
-      saveState(unchangedState);
+      await saveState(unchangedState);
 
       return res.status(200).json({
         ok: true,
@@ -263,7 +263,7 @@ export default async function handler(req, res) {
     const { transactions, skippedCount, attemptedCount } =
       await fetchTransactionsFromSignatures(newSignatureObjects);
 
-    const nextState = loadState();
+    const nextState = await loadState();
     const contributorSet = new Set();
 
     for (const tx of transactions) {
@@ -330,7 +330,7 @@ export default async function handler(req, res) {
     nextState.meta.lastSyncedAt = new Date().toISOString();
     nextState.meta.syncRuns += 1;
 
-    saveState(nextState);
+    await saveState(nextState);
 
     return res.status(200).json({
       ok: true,
