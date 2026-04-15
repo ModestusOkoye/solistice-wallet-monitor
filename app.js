@@ -1,4 +1,8 @@
 const SUMMARY_API = "/api/summary";
+const FEE_HISTORY_API = "/api/fee-history";
+
+let solChart = null;
+let walletChart = null;
 
 function shortenSig(sig) {
   return sig.slice(0, 8) + "..." + sig.slice(-6);
@@ -31,6 +35,22 @@ async function fetchSummary() {
   return data;
 }
 
+async function fetchFeeHistory() {
+  const response = await fetch(FEE_HISTORY_API);
+
+  if (!response.ok) {
+    throw new Error(`Fee history API failed with status ${response.status}`);
+  }
+
+  const data = await response.json();
+
+  if (!data.ok) {
+    throw new Error(data.error || "Fee history API returned an error");
+  }
+
+  return data;
+}
+
 function renderFeeRow(tx) {
   const time = tx.blockTime ? timeAgo(tx.blockTime) : "--";
   const failed = tx.err !== null && tx.err !== undefined;
@@ -57,23 +77,6 @@ function setText(id, value) {
 }
 
 function initializePlaceholders() {
-  const solChart = document.getElementById("sol-chart");
-  const walletChart = document.getElementById("wallet-chart");
-
-  if (solChart && solChart.parentElement) {
-    solChart.parentElement.innerHTML = `
-      <h2 class="text-sm font-semibold text-gray-300 mb-4">Daily SOL Contributed</h2>
-      <p class="text-sm text-gray-500">This chart will be wired in the next step using a server-side API route.</p>
-    `;
-  }
-
-  if (walletChart && walletChart.parentElement) {
-    walletChart.parentElement.innerHTML = `
-      <h2 class="text-sm font-semibold text-gray-300 mb-4">Daily Wallets Contributing</h2>
-      <p class="text-sm text-gray-500">This chart will be wired in the next step using a server-side API route.</p>
-    `;
-  }
-
   const multisigList = document.getElementById("multisig-list");
   if (multisigList) {
     multisigList.innerHTML =
@@ -95,6 +98,124 @@ async function searchWallet() {
         <p class="text-gray-300 text-sm">Wallet search will be connected in the next step.</p>
       </div>
     `;
+  }
+}
+
+function renderCharts(labels, dailySol, dailyWalletsContributing) {
+  if (typeof Chart === "undefined") {
+    console.error("Chart.js is not loaded");
+    return;
+  }
+
+  const solCtx = document.getElementById("sol-chart");
+  const walletCtx = document.getElementById("wallet-chart");
+
+  if (!solCtx || !walletCtx) {
+    return;
+  }
+
+  const sharedOptions = {
+    responsive: true,
+    plugins: {
+      legend: {
+        display: false,
+      },
+    },
+    scales: {
+      x: {
+        ticks: {
+          color: "#9ca3af",
+          font: {
+            size: 10,
+          },
+        },
+        grid: {
+          color: "rgba(255,255,255,0.05)",
+        },
+      },
+      y: {
+        beginAtZero: true,
+        ticks: {
+          color: "#9ca3af",
+          font: {
+            size: 10,
+          },
+        },
+        grid: {
+          color: "rgba(255,255,255,0.05)",
+        },
+      },
+    },
+  };
+
+  if (solChart) {
+    solChart.data.labels = labels;
+    solChart.data.datasets[0].data = dailySol;
+    solChart.update();
+  } else {
+    solChart = new Chart(solCtx.getContext("2d"), {
+      type: "bar",
+      data: {
+        labels,
+        datasets: [
+          {
+            label: "SOL",
+            data: dailySol,
+            backgroundColor: "rgba(52, 211, 153, 0.7)",
+            borderColor: "rgba(52, 211, 153, 1)",
+            borderWidth: 1,
+            borderRadius: 6,
+            borderSkipped: false,
+          },
+        ],
+      },
+      options: {
+        ...sharedOptions,
+        plugins: {
+          ...sharedOptions.plugins,
+          tooltip: {
+            callbacks: {
+              label: (ctx) => `${ctx.parsed.y} SOL`,
+            },
+          },
+        },
+      },
+    });
+  }
+
+  if (walletChart) {
+    walletChart.data.labels = labels;
+    walletChart.data.datasets[0].data = dailyWalletsContributing;
+    walletChart.update();
+  } else {
+    walletChart = new Chart(walletCtx.getContext("2d"), {
+      type: "bar",
+      data: {
+        labels,
+        datasets: [
+          {
+            label: "Wallets",
+            data: dailyWalletsContributing,
+            backgroundColor: "rgba(96, 165, 250, 0.7)",
+            borderColor: "rgba(96, 165, 250, 1)",
+            borderWidth: 1,
+            borderRadius: 6,
+            borderSkipped: false,
+          },
+        ],
+      },
+      options: {
+        ...sharedOptions,
+        plugins: {
+          ...sharedOptions.plugins,
+          tooltip: {
+            callbacks: {
+              label: (ctx) => `${ctx.parsed.y} payments`,
+            },
+          },
+        },
+      },
+    });
   }
 }
 
@@ -143,7 +264,19 @@ async function updateDashboard() {
   }
 }
 
+async function updateCharts() {
+  try {
+    const data = await fetchFeeHistory();
+    renderCharts(data.labels, data.dailySol, data.dailyWalletsContributing);
+  } catch (error) {
+    console.error("Chart update failed:", error);
+  }
+}
+
 initializePlaceholders();
 
 updateDashboard();
+updateCharts();
+
 setInterval(updateDashboard, 12000);
+setInterval(updateCharts, 60000);
