@@ -1,6 +1,7 @@
 const SUMMARY_API = "/api/summary";
 const FEE_HISTORY_API = "/api/fee-history";
 const SEARCH_WALLET_API = "/api/search-wallet";
+const WALLET_ACTIVITY_API = "/api/wallet-activity";
 
 let solChart = null;
 let walletChart = null;
@@ -26,33 +27,25 @@ function timeAgo(ts) {
 
 async function fetchSummary() {
   const response = await fetch(SUMMARY_API);
-
   if (!response.ok) {
     throw new Error(`Summary API failed with status ${response.status}`);
   }
-
   const data = await response.json();
-
   if (!data.ok) {
     throw new Error(data.error || "Summary API returned an error");
   }
-
   return data;
 }
 
 async function fetchFeeHistory() {
   const response = await fetch(FEE_HISTORY_API);
-
   if (!response.ok) {
     throw new Error(`Fee history API failed with status ${response.status}`);
   }
-
   const data = await response.json();
-
   if (!data.ok) {
     throw new Error(data.error || "Fee history API returned an error");
   }
-
   return data;
 }
 
@@ -60,13 +53,24 @@ async function fetchWalletSearch(address) {
   const response = await fetch(
     `${SEARCH_WALLET_API}?address=${encodeURIComponent(address)}`
   );
-
   const data = await response.json();
 
   if (!response.ok || !data.ok) {
     throw new Error(data.error || `Wallet search failed with status ${response.status}`);
   }
 
+  return data;
+}
+
+async function fetchWalletActivity() {
+  const response = await fetch(WALLET_ACTIVITY_API);
+  if (!response.ok) {
+    throw new Error(`Wallet activity API failed with status ${response.status}`);
+  }
+  const data = await response.json();
+  if (!data.ok) {
+    throw new Error(data.error || "Wallet activity API returned an error");
+  }
   return data;
 }
 
@@ -114,23 +118,30 @@ function renderSearchMatches(matches) {
   `;
 }
 
+function renderActivityRow(item) {
+  let badge = `<span class="text-gray-500 text-xs">${item.label}</span>`;
+
+  if (item.type === "sent") {
+    badge = `<span class="text-red-400 text-xs font-bold">▲ Sent ${item.amountSol} SOL</span>`;
+  } else if (item.type === "received") {
+    badge = `<span class="text-emerald-400 text-xs font-bold">▼ Received ${item.amountSol} SOL</span>`;
+  } else if (item.type === "squads") {
+    badge = `<span class="text-blue-400 text-xs font-bold">${item.label}</span>`;
+  }
+
+  return `
+    <div class="flex items-center justify-between bg-gray-800 rounded-xl px-4 py-2">
+      <a href="https://solscan.io/tx/${item.signature}" target="_blank"
+         class="text-blue-400 hover:underline text-xs">${shortenSig(item.signature)}</a>
+      <span class="text-gray-400 text-xs">${timeAgo(item.blockTime)}</span>
+      ${badge}
+    </div>
+  `;
+}
+
 function setText(id, value) {
   const el = document.getElementById(id);
   if (el) el.textContent = value;
-}
-
-function initializePlaceholders() {
-  const multisigList = document.getElementById("multisig-list");
-  if (multisigList) {
-    multisigList.innerHTML =
-      '<p class="text-gray-500">Multisig activity will be connected in the next step.</p>';
-  }
-
-  const approverList = document.getElementById("approver-list");
-  if (approverList) {
-    approverList.innerHTML =
-      '<p class="text-gray-500">Approver wallet activity will be connected in the next step.</p>';
-  }
 }
 
 async function searchWallet() {
@@ -369,10 +380,45 @@ async function updateCharts() {
   }
 }
 
-initializePlaceholders();
+async function updateWalletActivity() {
+  const multisigList = document.getElementById("multisig-list");
+  const approverList = document.getElementById("approver-list");
+
+  try {
+    const data = await fetchWalletActivity();
+
+    if (multisigList) {
+      multisigList.innerHTML =
+        data.multisig && data.multisig.length
+          ? data.multisig.map(renderActivityRow).join("")
+          : '<p class="text-gray-500">No recent multisig activity found.</p>';
+    }
+
+    if (approverList) {
+      approverList.innerHTML =
+        data.approver && data.approver.length
+          ? data.approver.map(renderActivityRow).join("")
+          : '<p class="text-gray-500">No recent approver activity found.</p>';
+    }
+  } catch (error) {
+    console.error("Wallet activity update failed:", error);
+
+    if (multisigList) {
+      multisigList.innerHTML =
+        '<p class="text-red-400">Failed to load multisig activity.</p>';
+    }
+
+    if (approverList) {
+      approverList.innerHTML =
+        '<p class="text-red-400">Failed to load approver wallet activity.</p>';
+    }
+  }
+}
 
 updateDashboard();
 updateCharts();
+updateWalletActivity();
 
 setInterval(updateDashboard, 12000);
 setInterval(updateCharts, 60000);
+setInterval(updateWalletActivity, 30000);
