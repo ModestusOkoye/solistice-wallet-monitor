@@ -1,11 +1,7 @@
 const SUMMARY_API = "/api/summary";
-const FEE_HISTORY_API = "/api/fee-history";
 const SEARCH_WALLET_API = "/api/search-wallet";
 const WALLET_ACTIVITY_API = "/api/wallet-activity";
 const FEE_OUTFLOWS_API = "/api/fee-outflows";
-
-let solChart = null;
-let walletChart = null;
 
 function shortenSig(sig) {
   return sig.slice(0, 8) + "..." + sig.slice(-6);
@@ -35,20 +31,6 @@ async function fetchSummary() {
   const data = await response.json();
   if (!data.ok) {
     throw new Error(data.error || "Summary API returned an error");
-  }
-
-  return data;
-}
-
-async function fetchFeeHistory() {
-  const response = await fetch(FEE_HISTORY_API);
-  if (!response.ok) {
-    throw new Error(`Fee history API failed with status ${response.status}`);
-  }
-
-  const data = await response.json();
-  if (!data.ok) {
-    throw new Error(data.error || "Fee history API returned an error");
   }
 
   return data;
@@ -258,122 +240,6 @@ async function searchWallet() {
   }
 }
 
-function renderCharts(labels, dailySol, dailyWalletsContributing) {
-  if (typeof Chart === "undefined") {
-    console.error("Chart.js is not loaded");
-    return;
-  }
-
-  const solCtx = document.getElementById("sol-chart");
-  const walletCtx = document.getElementById("wallet-chart");
-
-  if (!solCtx || !walletCtx) return;
-
-  const sharedOptions = {
-    responsive: true,
-    plugins: {
-      legend: {
-        display: false,
-      },
-    },
-    scales: {
-      x: {
-        ticks: {
-          color: "#9ca3af",
-          font: {
-            size: 10,
-          },
-        },
-        grid: {
-          color: "rgba(255,255,255,0.05)",
-        },
-      },
-      y: {
-        beginAtZero: true,
-        ticks: {
-          color: "#9ca3af",
-          font: {
-            size: 10,
-          },
-        },
-        grid: {
-          color: "rgba(255,255,255,0.05)",
-        },
-      },
-    },
-  };
-
-  if (solChart) {
-    solChart.data.labels = labels;
-    solChart.data.datasets[0].data = dailySol;
-    solChart.update();
-  } else {
-    solChart = new Chart(solCtx.getContext("2d"), {
-      type: "bar",
-      data: {
-        labels,
-        datasets: [
-          {
-            label: "SOL",
-            data: dailySol,
-            backgroundColor: "rgba(52, 211, 153, 0.7)",
-            borderColor: "rgba(52, 211, 153, 1)",
-            borderWidth: 1,
-            borderRadius: 6,
-            borderSkipped: false,
-          },
-        ],
-      },
-      options: {
-        ...sharedOptions,
-        plugins: {
-          ...sharedOptions.plugins,
-          tooltip: {
-            callbacks: {
-              label: (ctx) => `${ctx.parsed.y} SOL`,
-            },
-          },
-        },
-      },
-    });
-  }
-
-  if (walletChart) {
-    walletChart.data.labels = labels;
-    walletChart.data.datasets[0].data = dailyWalletsContributing;
-    walletChart.update();
-  } else {
-    walletChart = new Chart(walletCtx.getContext("2d"), {
-      type: "bar",
-      data: {
-        labels,
-        datasets: [
-          {
-            label: "Wallets",
-            data: dailyWalletsContributing,
-            backgroundColor: "rgba(96, 165, 250, 0.7)",
-            borderColor: "rgba(96, 165, 250, 1)",
-            borderWidth: 1,
-            borderRadius: 6,
-            borderSkipped: false,
-          },
-        ],
-      },
-      options: {
-        ...sharedOptions,
-        plugins: {
-          ...sharedOptions.plugins,
-          tooltip: {
-            callbacks: {
-              label: (ctx) => `${ctx.parsed.y} payments`,
-            },
-          },
-        },
-      },
-    });
-  }
-}
-
 async function updateDashboard() {
   try {
     const data = await fetchSummary();
@@ -422,15 +288,6 @@ async function updateDashboard() {
     setText("count", "--");
     setText("count-note", "unable to load registration estimate");
     setText("last-update", "--");
-  }
-}
-
-async function updateCharts() {
-  try {
-    const data = await fetchFeeHistory();
-    renderCharts(data.labels, data.dailySol, data.dailyWalletsContributing);
-  } catch (error) {
-    console.error("Chart update failed:", error);
   }
 }
 
@@ -527,11 +384,9 @@ async function updateFeeOutflows() {
 window.searchWallet = searchWallet;
 
 updateDashboard();
-updateCharts();
 updateWalletActivity();
 updateFeeOutflows();
 
 setInterval(updateDashboard, 12000);
-setInterval(updateCharts, 60000);
 setInterval(updateWalletActivity, 30000);
 setInterval(updateFeeOutflows, 30000);

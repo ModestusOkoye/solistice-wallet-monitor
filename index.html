@@ -5,14 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Solstice $SLX Fee Monitor</title>
   <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.6.0/css/all.min.css" />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body class="bg-gray-950 text-white min-h-screen p-6">
   <div class="max-w-6xl mx-auto">
 
-    <!-- Header -->
     <div class="flex items-center justify-between mb-2">
       <h1 class="text-3xl md:text-4xl font-bold flex items-center gap-3">
         <i class="fas fa-satellite-dish text-emerald-400"></i>
@@ -28,7 +26,6 @@
       Auto-refreshes every 12 seconds. Data pulled directly from Solana mainnet.
     </p>
 
-    <!-- Stats -->
     <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
       <div class="bg-gray-900 rounded-2xl p-6 border border-gray-800">
         <p class="text-gray-400 text-sm mb-1">Current Balance</p>
@@ -51,20 +48,6 @@
       </div>
     </div>
 
-    <!-- Charts -->
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-      <div class="bg-gray-900 rounded-2xl p-6 border border-gray-800">
-        <h2 class="text-lg font-semibold text-white mb-4">Daily SOL Contributed</h2>
-        <canvas id="sol-chart" height="180"></canvas>
-      </div>
-
-      <div class="bg-gray-900 rounded-2xl p-6 border border-gray-800">
-        <h2 class="text-lg font-semibold text-white mb-4">Daily Wallets Contributing</h2>
-        <canvas id="wallet-chart" height="180"></canvas>
-      </div>
-    </div>
-
-    <!-- Alert -->
     <div id="alert-box" class="hidden bg-red-900 border border-red-500 rounded-2xl p-5 mb-6">
       <div class="flex items-center gap-3 mb-2">
         <i class="fas fa-exclamation-triangle text-red-400 text-xl"></i>
@@ -73,7 +56,6 @@
       <p class="text-red-200 text-sm" id="alert-msg">Money has left the fee wallet. Check immediately.</p>
     </div>
 
-    <!-- Wallet Search -->
     <div class="bg-gray-900 rounded-2xl p-6 border border-gray-800 mb-6">
       <h2 class="text-2xl font-semibold mb-4">Search if a Wallet Contributed</h2>
       <div class="flex flex-col md:flex-row gap-3">
@@ -93,7 +75,6 @@
       <div id="search-result" class="mt-3 text-sm"></div>
     </div>
 
-    <!-- Recent Fee Transactions -->
     <div class="bg-gray-900 rounded-2xl p-6 border border-gray-800 mb-6">
       <div class="flex items-center justify-between mb-4">
         <h2 class="text-2xl font-semibold">Recent Fee Transactions</h2>
@@ -104,7 +85,6 @@
       </div>
     </div>
 
-    <!-- Fee Wallet Outflows -->
     <div class="bg-gray-900 rounded-2xl p-6 border border-gray-800 mb-6">
       <div class="flex items-center justify-between mb-4">
         <h2 class="text-2xl font-semibold">Fee Wallet Outflows</h2>
@@ -120,7 +100,6 @@
       </div>
     </div>
 
-    <!-- Multisig Activity -->
     <div class="bg-gray-900 rounded-2xl p-6 border border-gray-800 mb-6">
       <div class="flex items-center justify-between mb-4">
         <h2 class="text-2xl font-semibold">Multisig Recent Activity</h2>
@@ -140,7 +119,6 @@
       </div>
     </div>
 
-    <!-- Approver Wallet Activity -->
     <div class="bg-gray-900 rounded-2xl p-6 border border-gray-800 mb-6">
       <div class="flex items-center justify-between mb-4">
         <h2 class="text-2xl font-semibold">Approver Wallet Activity</h2>
@@ -160,7 +138,6 @@
       </div>
     </div>
 
-    <!-- Address Reference -->
     <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
       <div class="bg-gray-900 rounded-2xl p-5 border border-gray-800">
         <p class="text-gray-400 text-xs mb-2 uppercase tracking-widest">Fee Wallet</p>
