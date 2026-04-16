@@ -2,10 +2,9 @@ const FEE_WALLET = "DuX1wcoQrJ6XypxLNq3GRrmHFAAMgCqAKbzboabyCtzB";
 const EXPECTED_FEE_SOL = 0.075;
 const FEE_TOLERANCE_SOL = 0.001;
 
-const DAY_WINDOW = 2; // yesterday + today
+const START_DATE_UTC = "2026-04-14T00:00:00Z";
 const SIGNATURE_PAGE_SIZE = 100;
-const MAX_PAGES = 10;
-const MAX_TX_FETCH = 300;
+const MAX_PAGES = 200;
 const TX_BATCH_SIZE = 10;
 
 async function heliusRpc(method, params) {
@@ -49,21 +48,12 @@ function chunkArray(arr, size) {
   return chunks;
 }
 
-function getUtcDayKeyFromUnix(blockTime) {
-  return new Date(blockTime * 1000).toISOString().slice(0, 10);
+function isFeeLikeAmount(amountSol) {
+  return Math.abs(amountSol - EXPECTED_FEE_SOL) <= FEE_TOLERANCE_SOL;
 }
 
-function getRecentDayKeys(windowDays = DAY_WINDOW) {
-  const keys = [];
-
-  for (let i = windowDays - 1; i >= 0; i--) {
-    const d = new Date();
-    d.setUTCHours(0, 0, 0, 0);
-    d.setUTCDate(d.getUTCDate() - i);
-    keys.push(d.toISOString().slice(0, 10));
-  }
-
-  return keys;
+function getDayKeyFromUnix(blockTime) {
+  return new Date(blockTime * 1000).toISOString().slice(0, 10);
 }
 
 function formatLabel(dayKey) {
@@ -73,10 +63,6 @@ function formatLabel(dayKey) {
     day: "numeric",
     timeZone: "UTC",
   });
-}
-
-function isFeeLikeAmount(amountSol) {
-  return Math.abs(amountSol - EXPECTED_FEE_SOL) <= FEE_TOLERANCE_SOL;
 }
 
 function extractAllInstructions(tx) {
@@ -120,12 +106,11 @@ function extractSystemTransfers(tx) {
   return Array.from(deduped.values());
 }
 
-async function fetchRecentSignatures() {
-  const dayKeys = getRecentDayKeys(DAY_WINDOW);
-  const oldestNeededDay = dayKeys[0];
-  const oldestNeededMs = new Date(`${oldestNeededDay}T00:00:00Z`).getTime();
+async function fetchSignaturesFromStartDate() {
+  const startMs = new Date(START_DATE_UTC).getTime();
 
   let before = undefined;
+  let crossedStartDate = false;
   const collected = [];
 
   for (let page = 0; page < MAX_PAGES; page++) {
@@ -135,14 +120,24 @@ async function fetchRecentSignatures() {
 
     const batch = await heliusRpc("getSignaturesForAddress", [FEE_WALLET, options]);
 
-    if (!batch || batch.length === 0) break;
+    if (!batch || batch.length === 0) {
+      break;
+    }
 
-    collected.push(...batch);
+    for (const sig of batch) {
+      if (!sig.blockTime) continue;
 
-    const oldest = batch[batch.length - 1];
-    const oldestMs = oldest?.blockTime ? oldest.blockTime * 1000 : null;
+      const sigMs = sig.blockTime * 1000;
 
-    if (oldestMs !== null && oldestMs < oldestNeededMs) {
+      if (sigMs >= startMs) {
+        collected.push(sig);
+      } else {
+        crossedStartDate = true;
+        break;
+      }
+    }
+
+    if (crossedStartDate) {
       break;
     }
 
@@ -151,16 +146,9 @@ async function fetchRecentSignatures() {
     }
 
     before = batch[batch.length - 1].signature;
-
-    if (collected.length >= MAX_TX_FETCH) {
-      break;
-    }
   }
 
-  return collected
-    .filter((sig) => sig.err === null && sig.blockTime)
-    .filter((sig) => sig.blockTime * 1000 >= oldestNeededMs)
-    .slice(0, MAX_TX_FETCH);
+  return collected.filter((sig) => sig.err === null && sig.blockTime);
 }
 
 async function fetchTransactions(signatureObjects) {
@@ -207,24 +195,23 @@ export default async function handler(req, res) {
   }
 
   try {
-    const recentDayKeys = getRecentDayKeys(DAY_WINDOW);
-    const buckets = {};
-
-    for (const dayKey of recentDayKeys) {
-      buckets[dayKey] = {
-        feeSol: 0,
-        contributors: new Set(),
-      };
-    }
-
-    const signatures = await fetchRecentSignatures();
+    const signatures = await fetchSignaturesFromStartDate();
     const transactions = await fetchTransactions(signatures);
+
+    const buckets = {};
 
     for (const tx of transactions) {
       if (!tx.blockTime) continue;
 
-      const dayKey = getUtcDayKeyFromUnix(tx.blockTime);
-      if (!buckets[dayKey]) continue;
+      const dayKey = getDayKeyFromUnix(tx.blockTime);
+
+      if (!buckets[dayKey]) {
+        buckets[dayKey] = {
+          feeSol: 0,
+          contributors: new Set(),
+          feeTxCount: 0,
+        };
+      }
 
       const transfers = extractSystemTransfers(tx);
 
@@ -236,6 +223,7 @@ export default async function handler(req, res) {
           buckets[dayKey].feeSol = Number(
             (buckets[dayKey].feeSol + transfer.amountSol).toFixed(6)
           );
+          buckets[dayKey].feeTxCount += 1;
 
           if (transfer.source) {
             buckets[dayKey].contributors.add(transfer.source);
@@ -244,18 +232,26 @@ export default async function handler(req, res) {
       }
     }
 
-    const labels = recentDayKeys.map(formatLabel);
-    const dailySol = recentDayKeys.map((dayKey) => buckets[dayKey].feeSol);
-    const dailyWalletsContributing = recentDayKeys.map(
+    const sortedDays = Object.keys(buckets).sort();
+
+    const labels = sortedDays.map(formatLabel);
+    const dailySol = sortedDays.map((dayKey) => buckets[dayKey].feeSol);
+    const dailyWalletsContributing = sortedDays.map(
       (dayKey) => buckets[dayKey].contributors.size
+    );
+
+    const dailyFeeTxCount = sortedDays.map(
+      (dayKey) => buckets[dayKey].feeTxCount
     );
 
     return res.status(200).json({
       ok: true,
+      startDateUtc: START_DATE_UTC,
       labels,
       dailySol,
       dailyWalletsContributing,
-      dayCount: recentDayKeys.length,
+      dailyFeeTxCount,
+      dayCount: sortedDays.length,
       scannedSignatureCount: signatures.length,
       scannedTransactionCount: transactions.length,
       fetchedAt: new Date().toISOString(),
